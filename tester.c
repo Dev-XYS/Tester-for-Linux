@@ -21,6 +21,7 @@ struct problem
 	char name[32];
 	int testcase_count, time_limit, memory_limit;
 	char checker[32];
+	int score;
 }problems[16];
 
 struct result
@@ -45,7 +46,7 @@ int check(const char *chkr, const char *outf, const char *ansf)
 	return SYS("%s %s %s >/dev/null 2>&1", chkr, outf, ansf) == 0 ? AC : WA;
 }
 
-/* func run() 
+/* func run()
  * cmd  - Command to run contestants' program.
  * tlim - Time limit in seconds.
  * mlim - Memory limit megabytes.
@@ -84,7 +85,7 @@ struct result run(const char *cmd, int tlim, int mlim, const char *chkr, const c
 	{
 		setrlimit(RLIMIT_CPU, &(struct rlimit){tlim, tlim + 1});
 		chdir("tmp");
-		execl(cmd, NULL);
+		execl(cmd, "</dev/zero", ">/dev/null", "2>&1", NULL);
 	}
 }
 
@@ -115,13 +116,14 @@ void show_verdict(int verdict)
 
 void test_one_case(const char *contestant, int probi, int tci)
 {
+	SYS("rm %s.in %s.out >/dev/null 2>&1", problems[probi].name, problems[probi].name);
 	SYS("cp data/%s/%s%d.in tmp/%s.in >/dev/null 2>&1", problems[probi].name, problems[probi].name, tci, problems[probi].name);
-	
+
 	char outf[256], ansf[256];
 	sprintf(outf, "tmp/%s.out", problems[probi].name);
 	sprintf(ansf, "data/%s/%s%d.ans", problems[probi].name, problems[probi].name, tci);
 	struct result res = run("./_EXECUTABLE_", problems[probi].time_limit, problems[probi].memory_limit, problems[probi].checker, outf, ansf);
-	
+
 	if (res.verdict != TLE)
 	{
 		printf("  %4ldms", res.usage.ru_utime.tv_sec * 1000 + res.usage.ru_utime.tv_usec / 1000);
@@ -133,52 +135,89 @@ void test_one_case(const char *contestant, int probi, int tci)
 	printf(" %7ldKB", res.usage.ru_maxrss);
 	show_verdict(res.verdict);
 	printf("\n");
-	
-	SYS("rm %s.in %s.out >/dev/null 2>&1", problems[probi].name, problems[probi].name);
+
+	if (res.verdict == AC)
+	{
+		problems[probi].score += 100 / problems[probi].testcase_count;
+	}
 }
 
 void test_one_contestant_one_problem(const char *contestant, int probi)
 {
+	system("rm tmp/_EXECUTABLE_ >/dev/null 2>&1");
 	system("mkdir tmp >/dev/null 2>&1");
-	printf("Compiling...");
+
+	problems[probi].score = 0;
+
+	printf("Problem: %s\n\nCompiling...", problems[probi].name);
 	if (SYS("g++ src/%s/%s/%s.cpp -o tmp/_EXECUTABLE_ >/dev/null 2>&1", contestant, problems[probi].name, problems[probi].name) == 0)
 	{
 		printf("  \033[1;32mOK\033[0m\n\n");
 	}
 	else
 	{
-		printf("  \033[1;31mFailed\033[0m\n");
+		printf("  \033[1;31mFailed\033[0m\n\n");
 		return;
 	}
+
 	for (int i = 1; i <= problems[probi].testcase_count; i++)
 	{
 		printf("Testcase #%2d", i);
 		test_one_case(contestant, probi, i);
 	}
-	system("rm _EXECUTABLE_ >/dev/null 2>&1");
+
+	printf("\n");
 }
 
 void test_one_contestant(const char *contestant)
 {
-	system("mkdir tmp >/dev/null 2>&1");
 	printf("\n>>> %s\n\n", contestant);
+
+	char path[256];
+	sprintf(path, "src/%s/_RESULT_", contestant);
+	FILE *f = fopen(path, "w");
+
+	fprintf(f, "%s", contestant);
 	for (int i = 1; i <= problem_count; i++)
 	{
 		test_one_contestant_one_problem(contestant, i);
+		fprintf(f, "\t%d", problems[i].score);
 	}
-	printf("\n");
+	fprintf(f, "\n");
+	fclose(f);
 }
 
 void test_all()
 {
 	system("mkdir tmp >/dev/null 2>&1");
 	system("ls src >tmp/_CONTESTANT_LIST_");
+
 	FILE *f = fopen("tmp/_CONTESTANT_LIST_", "r");
 	char contestant[256];
-	while (fscanf(f, "%[^\n] ", contestant) > 0)
+	for (int i = 0; fscanf(f, "%[^\n] ", contestant) > 0; i++)
 	{
 		test_one_contestant(contestant);
 	}
+	fclose(f);
+}
+
+void export_result()
+{
+	FILE *fl = fopen("tmp/_CONTESTANT_LIST_", "r");
+	FILE *fo = fopen("RESULT", "w");
+	char contestant[256];
+	for (int i = 0; fscanf(fl, "%[^\n] ", contestant) > 0; i++)
+	{
+		char path[256];
+		sprintf(path, "src/%s/_RESULT_", contestant);
+		FILE *fi = fopen(path, "r");
+		char buf[256];
+		fscanf(fi, "%[^\n]", buf);
+		fprintf(fo, "%s\n", buf);
+		fclose(fi);
+	}
+	fclose(fo);
+	fclose(fl);
 }
 
 int main()
@@ -196,7 +235,7 @@ int main()
 			scanf("%s", conf);
 			load_config(conf);
 		}
-		else if (strcmp(cmd, "test") == 0)
+		else if (strcmp(cmd, "testall") == 0)
 		{
 			test_all();
 		}
@@ -211,7 +250,12 @@ int main()
 			char contestant[256];
 			int probi;
 			scanf("%s%d", contestant, &probi);
+			printf("\n");
 			test_one_contestant_one_problem(contestant, probi);
+		}
+		else if (strcmp(cmd, "result") == 0)
+		{
+			export_result();
 		}
 		else
 		{
