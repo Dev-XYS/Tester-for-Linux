@@ -28,6 +28,16 @@ struct result
 {
 	int verdict;
 	struct rusage usage;
+}results[16][32];
+
+const char verdict_string[][32] =
+{
+	" \033[1;41;37m??\033[0m",
+	" \033[1;32mAC\033[0m",
+	" \033[1;31mWA\033[0m",
+	" \033[1;33mRE\033[0m",
+	"\033[1;35mTLE\033[0m",
+	"\033[1;35mMLE\033[0m"
 };
 
 void load_config(const char *conf)
@@ -89,29 +99,9 @@ struct result run(const char *cmd, int tlim, int mlim, const char *chkr, const c
 	}
 }
 
-void show_verdict(int verdict)
+char* get_verdict_string(int verdict)
 {
-	printf("  ");
-	switch (verdict)
-	{
-	case AC:
-		printf(" \033[1;32mAC\033[0m");
-		break;
-	case WA:
-		printf(" \033[1;31mWA\033[0m");
-		break;
-	case RE:
-		printf(" \033[1;33mRE\033[0m");
-		break;
-	case TLE:
-		printf("\033[1;35mTLE\033[0m");
-		break;
-	case MLE:
-		printf("\033[1;35mMLE\033[0m");
-		break;
-	default:
-		printf(" \033[1;41;37m??\033[0m");
-	}
+	return verdict_string[verdict];
 }
 
 void test_one_case(const char *contestant, int probi, int tci)
@@ -123,6 +113,7 @@ void test_one_case(const char *contestant, int probi, int tci)
 	sprintf(outf, "tmp/%s.out", problems[probi].name);
 	sprintf(ansf, "data/%s/%s%d.ans", problems[probi].name, problems[probi].name, tci);
 	struct result res = run("./_EXECUTABLE_", problems[probi].time_limit, problems[probi].memory_limit, problems[probi].checker, outf, ansf);
+	results[probi][tci] = res;
 
 	if (res.verdict != TLE)
 	{
@@ -133,8 +124,7 @@ void test_one_case(const char *contestant, int probi, int tci)
 		printf("        ");
 	}
 	printf(" %7ldKB", res.usage.ru_maxrss);
-	show_verdict(res.verdict);
-	printf("\n");
+	printf("  %s\n", get_verdict_string(res.verdict));
 
 	if (res.verdict == AC)
 	{
@@ -150,7 +140,7 @@ void test_one_contestant_one_problem(const char *contestant, int probi)
 	problems[probi].score = 0;
 
 	printf("Problem: %s\n\nCompiling...", problems[probi].name);
-	if (SYS("g++ src/%s/%s/%s.cpp -o tmp/_EXECUTABLE_ >/dev/null 2>&1", contestant, problems[probi].name, problems[probi].name) == 0)
+	if (SYS("g++ src/%s/%s/%s.cpp -o tmp/_EXECUTABLE_ -O2 >/dev/null 2>&1", contestant, problems[probi].name, problems[probi].name) == 0)
 	{
 		printf("  \033[1;32mOK\033[0m\n\n");
 	}
@@ -177,10 +167,34 @@ void test_one_contestant(const char *contestant)
 	sprintf(path, "src/%s/_RESULT_", contestant);
 	FILE *f = fopen(path, "w");
 
-	fprintf(f, "%s", contestant);
+	fprintf(f, "\n>>> %s\n\n", contestant);
 	for (int i = 1; i <= problem_count; i++)
 	{
 		test_one_contestant_one_problem(contestant, i);
+		fprintf(f, "Problem: %s  Score: %d/100\n\n", problems[i].name, problems[i].score);
+		for (int j = 1; j <= problems[i].testcase_count; j++)
+		{
+			fprintf(f, "Testcase #%2d", j);
+			if (results[i][j].verdict != TLE)
+			{
+				fprintf(f, "  %4dms", results[i][j].usage.ru_utime.tv_sec * 1000 + results[i][j].usage.ru_utime.tv_usec / 1000);
+			}
+			else
+			{
+				fprintf(f, "        ");
+			}
+			fprintf(f, " %7dKB", results[i][j].usage.ru_maxrss);
+			fprintf(f, "  %s\n", get_verdict_string(results[i][j].verdict));
+		}
+		fprintf(f, "\n");
+	}
+	fclose(f);
+
+	sprintf(path, "src/%s/_SCORE_", contestant);
+	f = fopen(path, "w");
+	fprintf(f, "%s", contestant);
+	for (int i = 1; i <= problem_count; i++)
+	{
 		fprintf(f, "\t%d", problems[i].score);
 	}
 	fprintf(f, "\n");
@@ -204,19 +218,28 @@ void test_all()
 void export_result()
 {
 	FILE *fl = fopen("tmp/_CONTESTANT_LIST_", "r");
-	FILE *fo = fopen("RESULT", "w");
+	FILE *fr = fopen("RESULT", "w");
+	FILE *fs = fopen("SCORE", "w");
 	char contestant[256];
 	for (int i = 0; fscanf(fl, "%[^\n] ", contestant) > 0; i++)
 	{
 		char path[256];
 		sprintf(path, "src/%s/_RESULT_", contestant);
 		FILE *fi = fopen(path, "r");
-		char buf[256];
-		fscanf(fi, "%[^\n]", buf);
-		fprintf(fo, "%s\n", buf);
+		char buf[65536];
+		while (~fscanf(fi, "%[^\xFF]", buf))
+		{
+			fprintf(fr, "%s", buf);
+		}
 		fclose(fi);
+
+		sprintf(path, "src/%s/_SCORE_", contestant);
+		fi = fopen(path, "r");
+		fscanf(fi, "%[^\xFF]", buf);
+		fprintf(fs, "%s", buf);
 	}
-	fclose(fo);
+	fclose(fs);
+	fclose(fr);
 	fclose(fl);
 }
 
@@ -250,7 +273,7 @@ int main()
 			char contestant[256];
 			int probi;
 			scanf("%s%d", contestant, &probi);
-			printf("\n");
+			printf("\nWarning: This will not update the contestant's score.\n\n");
 			test_one_contestant_one_problem(contestant, probi);
 		}
 		else if (strcmp(cmd, "result") == 0)
